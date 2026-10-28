@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 
 import tensorflow as tf
-from keras.applications import MobileNetV3Small
+from keras.applications import ResNet50V2
 from keras.layers import Dense, Dropout, GlobalAveragePooling2D
 from keras.models import Model
 
@@ -92,7 +92,7 @@ val_dataset = (
     .prefetch(1)
 )
 
-base_model = MobileNetV3Small(
+base_model = ResNet50V2(
     weights='imagenet',
     include_top=False,
     input_shape=(img_size[0], img_size[1], 3),
