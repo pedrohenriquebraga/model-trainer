@@ -2,26 +2,34 @@ import os
 from datetime import datetime
 
 import tensorflow as tf
-from keras.applications import ConvNeXtTiny
+from keras.applications import MobileNetV2
 from keras.layers import Dense, Dropout, GlobalAveragePooling2D
 from keras.models import Model
+from keras.regularizers import l2
 
 from augmentations import (
     build_augment_image,
     preprocess,
 )
 
-batch_size = 8
+batch_size = 32
 img_size = (300, 300)
 epochs = 100
 epochs_frozen = 10
+epochs_fine_tune_initial = 20
 early_stopping_patience = 10
 early_stopping_min_delta = 0.01
 
 base_lr = 1e-3
-fine_tune_lr = 2e-5
+fine_tune_lr_initial = 2e-5
+fine_tune_lr = 1e-5
 dropout_rate = 0.4
+classifier_l2 = 1e-4
+initial_fine_tune_layers = 30
+fine_tune_layers = 100
 shuffle_buffer = 1000 
+
+tf.keras.utils.set_random_seed(42)
 
 gpus = tf.config.list_physical_devices('GPU')
 base_dir = './data'
@@ -92,10 +100,9 @@ val_dataset = (
     .prefetch(1)
 )
 
-base_model = ConvNeXtTiny(
+base_model = MobileNetV2(
     weights='imagenet',
     include_top=False,
-    include_preprocessing=True,
     input_shape=(img_size[0], img_size[1], 3),
 )
 base_model.trainable = False
@@ -103,7 +110,12 @@ base_model.trainable = False
 x = GlobalAveragePooling2D()(base_model.output)
 x = Dropout(dropout_rate)(x)
 
-output = Dense(num_classes, activation='softmax', dtype='float32')(x)
+output = Dense(
+    num_classes,
+    activation='softmax',
+    kernel_regularizer=l2(classifier_l2),
+    dtype='float32',
+)(x)
 
 model = Model(inputs=base_model.input, outputs=output)
 
@@ -137,11 +149,15 @@ history_phase1 = model.fit(
 print("\n--- Fase 2: Fine-Tuning (Descongelando Backbone) ---")
 base_model.trainable = True
 
-for layer in base_model.layers[:100]:
+for layer in base_model.layers[:-initial_fine_tune_layers]:
     layer.trainable = False
 
+for layer in base_model.layers:
+    if isinstance(layer, tf.keras.layers.BatchNormalization):
+        layer.trainable = False
+
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=fine_tune_lr),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=fine_tune_lr_initial),
     loss=loss_fn,
     metrics=[tf.keras.metrics.CategoricalAccuracy(name='accuracy')],
 )
@@ -150,6 +166,28 @@ history_phase2 = model.fit(
     train_dataset,
     validation_data=val_dataset,
     initial_epoch=epochs_frozen,
+    epochs=min(epochs, epochs_frozen + epochs_fine_tune_initial),
+    callbacks=callbacks_list
+)
+
+print("\n--- Fase 3: Fine-Tuning Ampliado ---")
+for layer in base_model.layers[:-fine_tune_layers]:
+    layer.trainable = False
+
+for layer in base_model.layers:
+    if isinstance(layer, tf.keras.layers.BatchNormalization):
+        layer.trainable = False
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(learning_rate=fine_tune_lr),
+    loss=loss_fn,
+    metrics=[tf.keras.metrics.CategoricalAccuracy(name='accuracy')],
+)
+
+history_phase3 = model.fit(
+    train_dataset,
+    validation_data=val_dataset,
+    initial_epoch=epochs_frozen + epochs_fine_tune_initial,
     epochs=epochs,
     callbacks=callbacks_list
 )
