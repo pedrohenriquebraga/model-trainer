@@ -1,4 +1,4 @@
-# Treinador de modelos de visão
+# Model Trainer
 
 Este diretório contém o pipeline de treinamento de um modelo de visão computacional
 com TensorFlow/Keras. O pipeline lê imagens organizadas em diretórios por classe,
