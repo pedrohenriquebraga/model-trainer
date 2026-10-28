@@ -16,7 +16,7 @@ img_size = (300, 300)
 epochs = 100
 epochs_frozen = 10
 early_stopping_patience = 10
-early_stopping_min_delta = 0.01
+early_stopping_min_delta = 0.005
 
 base_lr = 1e-3
 fine_tune_lr = 2e-5
@@ -98,6 +98,7 @@ base_model = ResNet50V2(
     input_shape=(img_size[0], img_size[1], 3),
 )
 base_model.trainable = False
+model_name = base_model.name
 
 x = GlobalAveragePooling2D()(base_model.output)
 x = Dropout(dropout_rate)(x)
@@ -117,12 +118,16 @@ model.compile(
 os.makedirs('models', exist_ok=True)
 os.makedirs('logs', exist_ok=True)
 run_id = datetime.now().strftime('%Y%m%d-%H%M%S')
+run_name = f'{model_name}_{run_id}'
+best_model_path = os.path.join('models', f'best_{run_name}.keras')
+final_model_path = os.path.join('models', f'{run_name}.keras')
+summary_path = os.path.join('models', f'{run_name}.txt')
 
 callbacks_list = [
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6, verbose=1),
     tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=early_stopping_min_delta, patience=early_stopping_patience, mode='min', restore_best_weights=True, verbose=1),
-    tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join('models', f'best_{run_id}.keras'), monitor='val_loss', save_best_only=True, verbose=1),
-    tf.keras.callbacks.TensorBoard(log_dir=f"logs/fit/{run_id}", histogram_freq=1)
+    tf.keras.callbacks.ModelCheckpoint(filepath=best_model_path, monitor='val_loss', save_best_only=True, verbose=1),
+    tf.keras.callbacks.TensorBoard(log_dir=os.path.join('logs', 'fit', run_name), histogram_freq=1)
 ]
 
 print("\n--- Fase 1: Treinando Top Layers (Backbone Congelado) ---")
@@ -152,3 +157,38 @@ history_phase2 = model.fit(
     epochs=epochs,
     callbacks=callbacks_list
 )
+
+model.save(final_model_path)
+
+history = {}
+for key in set(history_phase1.history) | set(history_phase2.history):
+    history[key] = history_phase1.history.get(key, []) + history_phase2.history.get(key, [])
+
+best_epoch = min(
+    range(len(history['val_loss'])),
+    key=lambda epoch: history['val_loss'][epoch],
+)
+last_epoch = len(history['val_loss']) - 1
+
+with open(summary_path, 'w') as summary_file:
+    summary_file.write(f'Resumo do modelo: {run_name}\n')
+    summary_file.write(f'Treinamento: {datetime.strptime(run_id, "%Y%m%d-%H%M%S").strftime("%Y-%m-%d %H:%M:%S")}\n')
+    summary_file.write(f'Modelo final: {final_model_path}\n')
+    summary_file.write(f'Melhor modelo: {best_model_path}\n')
+    summary_file.write(f'Epocas executadas: {len(history["val_loss"])}\n')
+    summary_file.write(f'Epoca com menor val_loss: {best_epoch + 1}\n')
+    summary_file.write('\nMetricas do modelo final salvo (melhor epoca):\n')
+    summary_file.write(f'Accuracy: {history["accuracy"][best_epoch]:.6f}\n')
+    summary_file.write(f'Val_accuracy: {history["val_accuracy"][best_epoch]:.6f}\n')
+    summary_file.write(f'Loss: {history["loss"][best_epoch]:.6f}\n')
+    summary_file.write(f'Val_loss: {history["val_loss"][best_epoch]:.6f}\n')
+    summary_file.write('\nMetricas da ultima epoca executada:\n')
+    summary_file.write(f'Accuracy: {history["accuracy"][last_epoch]:.6f}\n')
+    summary_file.write(f'Val_accuracy: {history["val_accuracy"][last_epoch]:.6f}\n')
+    summary_file.write(f'Loss: {history["loss"][last_epoch]:.6f}\n')
+    summary_file.write(f'Val_loss: {history["val_loss"][last_epoch]:.6f}\n')
+    summary_file.write(f'Parametros totais: {model.count_params()}\n')
+    summary_file.write(f'Classes ({len(all_class_names)}): {", ".join(all_class_names)}\n')
+
+print(f'Modelo final salvo em: {final_model_path}')
+print(f'Resumo salvo em: {summary_path}')
