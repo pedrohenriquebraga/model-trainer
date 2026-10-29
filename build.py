@@ -121,7 +121,7 @@ run_id = datetime.now().strftime('%Y%m%d-%H%M%S')
 run_name = f'{model_name}_{run_id}'
 best_model_path = os.path.join('models', f'best_{run_name}.keras')
 final_model_path = os.path.join('models', f'{run_name}.keras')
-summary_path = os.path.join('models', f'{run_name}.txt')
+summary_path = os.path.join('logs', 'infos', f'{run_name}.txt')
 
 callbacks_list = [
     tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6, verbose=1),
